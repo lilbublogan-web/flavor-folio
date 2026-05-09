@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "Recipe": {
+      "title": "Recipe",
+      "description": "A food recipe saved by a user.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "cookingTime": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["Easy", "Medium", "Hard"] },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "author": { "type": "string" },
+        "authorId": { "type": "string" },
+        "ingredients": { "type": "array", "items": { "type": "string" } },
+        "instructions": { "type": "array", "items": { "type": "string" } },
+        "nutrition": {
+          "type": "object",
+          "properties": {
+            "calories": { "type": "number" },
+            "protein": { "type": "string" },
+            "carbs": { "type": "string" },
+            "fat": { "type": "string" }
+          }
+        },
+        "pairings": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "cookingTime", "authorId", "createdAt"]
+    },
+    "MealPlan": {
+      "title": "Meal Plan",
+      "description": "A scheduled meal in the planner.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "recipeId": { "type": "string" },
+        "mealType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "recipeId", "mealType", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User preferences and subscription status.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "isPremium": { "type": "boolean" },
+        "pantry": { "type": "array", "items": { "type": "string" } },
+        "favorites": { "type": "array", "items": { "type": "string" } },
+        "generationCount": { "type": "integer" }
+      }
+    },
+    "ShoppingItem": {
+      "title": "Shopping Item",
+      "description": "An item in the user's shopping list.",
+      "type": "object",
+      "properties": {
+        "item": { "type": "string" },
+        "amount": { "type": "string" },
+        "checked": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["item", "checked", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Core user data."
+    },
+    "/users/{userId}/shoppingList/{itemId}": {
+      "schema": "ShoppingItem",
+      "description": "Individual shopping list items."
+    },
+    "/users/{userId}/mealPlans/{planId}": {
+      "schema": "MealPlan",
+      "description": "Scheduled meals in the weekly planner."
+    },
+    "/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Community and AI generated recipes."
+    }
+  }
+}

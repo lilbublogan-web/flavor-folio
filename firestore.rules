@@ -1,0 +1,110 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isVerifiedEmail() { return request.auth.token.email_verified == true; }
+
+    // --- Validation Blueprints ---
+
+    function isValidRecipe(data) {
+      return data.keys().hasAll(['title', 'description', 'cookingTime', 'difficulty', 'category', 'imageUrl', 'ingredients', 'instructions', 'authorId', 'createdAt'])
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 1000
+        && data.cookingTime is string && data.cookingTime.size() <= 50
+        && data.difficulty in ['Easy', 'Medium', 'Hard']
+        && data.category is string && data.category.size() <= 100
+        && data.imageUrl is string && data.imageUrl.size() <= 1000
+        && data.ingredients is list && data.ingredients.size() <= 100
+        && data.instructions is list && data.instructions.size() <= 100
+        && data.authorId == request.auth.uid
+        && data.createdAt == request.time
+        && (!data.keys().hasAny(['nutrition']) || data.nutrition is map)
+        && (!data.keys().hasAny(['pairings']) || data.pairings is list);
+    }
+
+    function isValidMealPlan(data) {
+      return data.keys().hasAll(['date', 'recipeId', 'mealType', 'createdAt'])
+        && data.date is string && data.date.size() <= 20
+        && data.recipeId is string && data.recipeId.size() <= 128
+        && data.mealType in ['Breakfast', 'Lunch', 'Dinner', 'Snack']
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['displayName', 'email', 'photoURL', 'isPremium', 'pantry', 'favorites', 'generationCount'])
+        && data.displayName is string && data.displayName.size() <= 200
+        && data.email == request.auth.token.email
+        && data.photoURL is string && data.photoURL.size() <= 1000
+        && data.isPremium is bool
+        && data.pantry is list
+        && data.favorites is list
+        && data.generationCount is int;
+    }
+
+    function isValidShoppingItem(data) {
+      return data.keys().hasAll(['item', 'amount', 'checked', 'createdAt'])
+        && data.item is string && data.item.size() <= 200
+        && data.amount is string && data.amount.size() <= 50
+        && data.checked is bool
+        && data.createdAt == request.time;
+    }
+
+    // --- Match Rules ---
+
+    // Recipes: Public Read, Authored Write
+    match /recipes/{recipeId} {
+      allow get: if true;
+      allow list: if true; // Public directory for now
+      allow create: if isSignedIn() && isVerifiedEmail() && isValidId(recipeId) && isValidRecipe(incoming());
+      allow update: if isSignedIn() && isOwner(existing().authorId) 
+        && isValidRecipe(incoming())
+        && incoming().authorId == existing().authorId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action: Edit
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'cookingTime', 'difficulty', 'category', 'imageUrl', 'ingredients', 'instructions'])
+        );
+      allow delete: if isSignedIn() && isOwner(existing().authorId);
+    }
+
+    // Users: Owner Read/Write
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(incoming()) && incoming().isPremium == false && incoming().generationCount == 0;
+      allow update: if isOwner(userId) 
+        && isValidUserProfile(incoming())
+        && incoming().email == existing().email // Email immutable for security
+        && (
+          // Action: Update Profile/Pantry
+          (incoming().isPremium == existing().isPremium && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'pantry', 'favorites', 'generationCount'])) ||
+          // Action: Upgrade to Pro (Only for developer or verified testers)
+          (request.auth.token.email in ['lilbub.logan@gmail.com', 'logintaylor500@gmail.com'] && incoming().isPremium == true && existing().isPremium == false && incoming().diff(existing()).affectedKeys().hasOnly(['isPremium']))
+        );
+    }
+
+    // Shopping List: Owner Read/Write
+    match /users/{userId}/shoppingList/{itemId} {
+      allow read, write: if isOwner(userId);
+      allow create: if isValidShoppingItem(incoming());
+      allow update: if isValidShoppingItem(incoming()) && incoming().createdAt == existing().createdAt;
+    }
+
+    // Meal Plans: Owner Read/Write
+    match /users/{userId}/mealPlans/{planId} {
+      allow read, write: if isOwner(userId);
+      allow create: if isValidMealPlan(incoming());
+      allow update: if isValidMealPlan(incoming()) && incoming().createdAt == existing().createdAt;
+    }
+  }
+}
