@@ -6,7 +6,7 @@ import Stripe from "stripe";
 import admin from "firebase-admin";
 import dotenv from "dotenv";
 import cors from "cors";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 dotenv.config();
 
@@ -101,7 +101,9 @@ async function startServer() {
   });
 
   app.post("/api/generate-recipe", async (req, res) => {
+    console.log("[Server] Hit /api/generate-recipe");
     const { ingredients, precise } = req.body;
+    console.log("[Server] Ingredients:", ingredients);
     
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -110,7 +112,11 @@ async function startServer() {
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+      });
+
       const modeInstructions = precise 
         ? "STRICT REQUIREMENT: Use ONLY the ingredients listed. DO NOT add any extra ingredients, even common ones like oil, salt, water, or spices, unless they are explicitly in the provided list. No substitutions allowed. The recipe MUST be possible using ONLY these items."
         : "You may assume common pantry staples like salt, oil, and basic spices are available if they complement the provided ingredients.";
@@ -121,53 +127,46 @@ ${modeInstructions}
 
 Ensure the cooking instructions are clear and professional. Return the recipe in JSON format.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const result = await model.generateContent({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: {
+        generationConfig: {
           responseMimeType: "application/json",
           responseSchema: {
-            type: Type.OBJECT,
+            type: SchemaType.OBJECT,
             properties: {
-              title: { type: Type.STRING },
-              description: { type: Type.STRING },
+              title: { type: SchemaType.STRING },
+              description: { type: SchemaType.STRING },
               ingredients: {
-                type: Type.ARRAY,
+                type: SchemaType.ARRAY,
                 items: {
-                  type: Type.OBJECT,
+                  type: SchemaType.OBJECT,
                   properties: {
-                    item: { type: Type.STRING },
-                    amount: { type: Type.STRING }
+                    item: { type: SchemaType.STRING },
+                    amount: { type: SchemaType.STRING }
                   },
                   required: ["item", "amount"]
                 }
               },
               instructions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
+                type: SchemaType.ARRAY,
+                items: { type: SchemaType.STRING }
               },
-              cookingTime: { type: Type.STRING },
-              difficulty: {
-                type: Type.STRING,
-                enum: ["Easy", "Medium", "Hard"]
-              },
-              category: { 
-                type: Type.STRING,
-                enum: ["Breakfast", "Lunch", "Dinner", "Dessert"]
-              },
+              cookingTime: { type: SchemaType.STRING },
+              difficulty: { type: SchemaType.STRING },
+              category: { type: SchemaType.STRING },
               nutrition: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                  calories: { type: Type.NUMBER },
-                  protein: { type: Type.STRING },
-                  carbs: { type: Type.STRING },
-                  fat: { type: Type.STRING }
+                  calories: { type: SchemaType.NUMBER },
+                  protein: { type: SchemaType.STRING },
+                  carbs: { type: SchemaType.STRING },
+                  fat: { type: SchemaType.STRING }
                 },
                 required: ["calories", "protein", "carbs", "fat"]
               },
               pairings: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
+                type: SchemaType.ARRAY,
+                items: { type: SchemaType.STRING }
               }
             },
             required: ["title", "description", "ingredients", "instructions", "cookingTime", "difficulty", "category", "nutrition", "pairings"]
@@ -175,7 +174,8 @@ Ensure the cooking instructions are clear and professional. Return the recipe in
         }
       });
 
-      const text = response.text;
+      const response = await result.response;
+      const text = response.text();
       
       if (!text) {
         throw new Error("Gemini returned an empty response");
@@ -194,7 +194,10 @@ Ensure the cooking instructions are clear and professional. Return the recipe in
       }
     } catch (error: any) {
       console.error("[Server] Gemini Error:", error);
-      res.status(500).json({ error: error.message || "The AI Chef is busy right now. Please try again later." });
+      res.status(500).json({ 
+        error: error.message || "The AI Chef is busy right now. Please try again later.",
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   });
 
