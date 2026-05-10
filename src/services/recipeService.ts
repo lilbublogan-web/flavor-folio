@@ -274,7 +274,7 @@ Ensure the cooking instructions are clear and professional. Return the recipe in
       recipeData = JSON.parse(response.text);
     } catch (apiError: any) {
       console.error("Gemini API Error Detail:", apiError);
-      throw new Error("The AI Chef is busy right now. Please try again later.");
+      throw new Error(`The AI Chef is currently unavailable: ${apiError.message || "Unknown Error"}`);
     }
     
     const categoryImages: Record<string, string> = {
