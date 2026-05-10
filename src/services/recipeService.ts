@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { GoogleGenAI, Type } from "@google/genai";
 import { loadStripe } from "@stripe/stripe-js";
 import { 
   collection, 
@@ -16,6 +17,10 @@ import {
 import { db, auth } from "./firebase";
 import { Recipe, ShoppingItem, MealPlan } from "../types";
 import { MOCK_RECIPES } from "../data/mockRecipes";
+
+// Initialize Gemini with the correct SDK for this environment
+// The AI Studio platform injects process.env.GEMINI_API_KEY globally for React apps
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 interface FirestoreErrorInfo {
   error: string;
@@ -196,30 +201,80 @@ export const recipeService = {
     if (profile && !profile.isPremium && profile.generationCount >= 3) {
       throw new Error("Free limit reached. Upgrade to Pro for unlimited AI recipes.");
     }
+
+    const modeInstructions = precise 
+      ? "STRICT REQUIREMENT: Use ONLY the ingredients listed. DO NOT add any extra ingredients, even common ones like oil, salt, water, or spices, unless they are explicitly in the provided list. No substitutions allowed. The recipe MUST be possible using ONLY these items."
+      : "You may assume common pantry staples like salt, oil, and basic spices are available if they complement the provided ingredients.";
+
+    const prompt = `Act as a world-class chef and nutritionist. Create a unique, delicious, and healthy recipe using these ingredients: ${ingredients.join(", ")}. 
+
+${modeInstructions}
+
+Ensure the cooking instructions are clear and professional. Return the recipe in JSON format.`;
     
     let recipeData;
     try {
-      const response = await fetch("/api/generate-recipe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ingredients, precise }),
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              ingredients: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    item: { type: Type.STRING },
+                    amount: { type: Type.STRING }
+                  },
+                  required: ["item", "amount"]
+                }
+              },
+              instructions: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              cookingTime: { type: Type.STRING },
+              difficulty: {
+                type: Type.STRING,
+                enum: ["Easy", "Medium", "Hard"]
+              },
+              category: { 
+                type: Type.STRING,
+                enum: ["Breakfast", "Lunch", "Dinner", "Dessert"]
+              },
+              nutrition: {
+                type: Type.OBJECT,
+                properties: {
+                  calories: { type: Type.NUMBER },
+                  protein: { type: Type.STRING },
+                  carbs: { type: Type.STRING },
+                  fat: { type: Type.STRING }
+                },
+                required: ["calories", "protein", "carbs", "fat"]
+              },
+              pairings: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["title", "description", "ingredients", "instructions", "cookingTime", "difficulty", "category", "nutrition", "pairings"]
+          }
+        }
       });
-      
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        console.error("Non-JSON response from server:", text.substring(0, 100));
-        throw new Error(`The AI Laboratory returned an unexpected response: ${text.substring(0, 30)}...`);
-      }
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate recipe");
+      if (!response.text) {
+        throw new Error("Empty response from AI");
       }
-      recipeData = data;
+      recipeData = JSON.parse(response.text);
     } catch (apiError: any) {
-      console.error("Recipe Generation Error:", apiError);
-      throw new Error(apiError.message || "The AI Chef is busy right now. Please try again later.");
+      console.error("Gemini API Error Detail:", apiError);
+      throw new Error("The AI Chef is busy right now. Please try again later.");
     }
     
     const categoryImages: Record<string, string> = {
