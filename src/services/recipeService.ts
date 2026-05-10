@@ -209,7 +209,7 @@ export const recipeService = {
       if (!contentType || !contentType.includes("application/json")) {
         const text = await response.text();
         console.error("Non-JSON response from server:", text.substring(0, 100));
-        throw new Error("The AI Laboratory returned an unexpected response. Please try again.");
+        throw new Error(`The AI Laboratory returned an unexpected response: ${text.substring(0, 30)}...`);
       }
 
       const data = await response.json();
