@@ -100,6 +100,99 @@ async function startServer() {
     }
   });
 
+  app.post("/api/generate-recipe", async (req, res) => {
+    const { ingredients, precise } = req.body;
+    
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: "AI Laboratory is currently offline (Missing API Key on Server)." });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const modeInstructions = precise 
+      ? "STRICT REQUIREMENT: Use ONLY the ingredients listed. DO NOT add any extra ingredients, even common ones like oil, salt, water, or spices, unless they are explicitly in the provided list. No substitutions allowed. The recipe MUST be possible using ONLY these items."
+      : "You may assume common pantry staples like salt, oil, and basic spices are available if they complement the provided ingredients.";
+
+    const prompt = `Act as a world-class chef and nutritionist. Create a unique, delicious, and healthy recipe using these ingredients: ${ingredients.join(", ")}. 
+
+${modeInstructions}
+
+Ensure the cooking instructions are clear and professional. Return the recipe in JSON format.`;
+
+    try {
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              ingredients: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    item: { type: Type.STRING },
+                    amount: { type: Type.STRING }
+                  },
+                  required: ["item", "amount"]
+                }
+              },
+              instructions: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              cookingTime: { type: Type.STRING },
+              difficulty: {
+                type: Type.STRING,
+                enum: ["Easy", "Medium", "Hard"]
+              },
+              category: { 
+                type: Type.STRING,
+                enum: ["Breakfast", "Lunch", "Dinner", "Dessert"]
+              },
+              nutrition: {
+                type: Type.OBJECT,
+                properties: {
+                  calories: { type: Type.NUMBER },
+                  protein: { type: Type.STRING },
+                  carbs: { type: Type.STRING },
+                  fat: { type: Type.STRING }
+                },
+                required: ["calories", "protein", "carbs", "fat"]
+              },
+              pairings: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["title", "description", "ingredients", "instructions", "cookingTime", "difficulty", "category", "nutrition", "pairings"]
+          }
+        }
+      });
+
+      if (!result.text) {
+        throw new Error("Gemini returned an empty response");
+      }
+      
+      try {
+        const parsedData = JSON.parse(result.text);
+        res.json(parsedData);
+      } catch (parseError) {
+        console.error("JSON Parse Error from Gemini:", result.text);
+        res.status(500).json({ 
+          error: "The AI Chef's handwriting is illegible.",
+          details: "Invalid JSON returned by AI" 
+        });
+      }
+    } catch (error: any) {
+      console.error("Gemini Error:", error);
+      res.status(500).json({ error: error.message || "The AI Chef is busy right now. Please try again later." });
+    }
+  });
+
   app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
     const sig = req.headers["stripe-signature"] as string;
     let event;
